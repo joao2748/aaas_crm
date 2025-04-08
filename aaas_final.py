@@ -1,4 +1,4 @@
-# Conteúdo atualizado com TextBlob no lugar do modelo da Hugging Face
+# aaas_final.py
 import pandas as pd
 import streamlit as st
 from datetime import datetime
@@ -32,8 +32,8 @@ class AAAS:
     def _carregar_dados(self):
         if self.sheet:
             df = pd.DataFrame(self.sheet.get_all_records())
-            if not df.empty:
-                df['Data'] = pd.to_datetime(df['Data'])
+            if not df.empty and "Data" in df.columns:
+                df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
             return df
         return pd.DataFrame()
 
@@ -41,12 +41,12 @@ class AAAS:
         try:
             blob = TextBlob(texto)
             polaridade = blob.sentiment.polarity
-            if polaridade > 0.1:
+            if polaridade > 0:
                 return {"sentimento": "POSITIVE", "confianca": polaridade}
-            elif polaridade < -0.1:
+            elif polaridade < 0:
                 return {"sentimento": "NEGATIVE", "confianca": abs(polaridade)}
             else:
-                return {"sentimento": "NEUTRO", "confianca": 1 - abs(polaridade)}
+                return {"sentimento": "NEUTRAL", "confianca": 0}
         except Exception as e:
             logging.error(f"Erro na análise: {e}")
             return {"sentimento": "NEUTRO", "confianca": 0}
@@ -63,10 +63,10 @@ class AAAS:
 def main():
     st.set_page_config(page_title="AAAS Social Seller", layout="wide")
     aaas = AAAS()
-    
+
     st.sidebar.title("Configurações")
     dark_mode = st.sidebar.toggle("🌙 Modo Escuro")
-    
+
     if dark_mode:
         st.markdown("""
         <style>
@@ -75,8 +75,13 @@ def main():
             .css-18e3th9 { background-color: #1e1e1e; }
         </style>
         """, unsafe_allow_html=True)
-    
+
     st.title("📊 Painel AAAS Social Seller")
+
+    if aaas.dados.empty or "Status" not in aaas.dados.columns:
+        st.warning("Dados não carregados ou faltando colunas obrigatórias.")
+        return
+
     with st.expander("🔍 Filtros Avançados", expanded=True):
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -86,7 +91,7 @@ def main():
         with col3:
             data_min = st.date_input("Data inicial", aaas.dados["Data"].min())
             data_max = st.date_input("Data final", aaas.dados["Data"].max())
-    
+
     dados_filtrados = aaas.dados.copy()
     if status_filtro:
         dados_filtrados = dados_filtrados[dados_filtrados["Status"].isin(status_filtro)]
@@ -96,19 +101,18 @@ def main():
         (dados_filtrados["Data"] >= pd.to_datetime(data_min)) & 
         (dados_filtrados["Data"] <= pd.to_datetime(data_max))
     ]
-    
+
     st.header("📈 Visão Geral")
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Leads", len(dados_filtrados))
-    
+
     sentimentos = dados_filtrados["Interação"].apply(aaas.analisar_sentimento)
     positivos = sum(1 for s in sentimentos if s["sentimento"] == "POSITIVE")
-    col2.metric("Positivos", f"{positivos} ({positivos/len(dados_filtrados)*100:.1f}%)")
-    
-    col3.metric("Valor Médio", f"R${dados_filtrados['Valor'].mean():.2f}")
-    
+    col2.metric("Positivos", f"{positivos} ({(positivos/len(dados_filtrados)*100 if len(dados_filtrados) else 0):.1f}%)")
+
+    col3.metric("Valor Médio", f"R${dados_filtrados['Valor'].mean():.2f}" if not dados_filtrados.empty else "R$0.00")
+
     tab1, tab2 = st.tabs(["Distribuição", "Desempenho"])
-    
     with tab1:
         fig = px.pie(
             dados_filtrados,
@@ -117,7 +121,7 @@ def main():
             color_discrete_sequence=px.colors.qualitative.Pastel
         )
         st.plotly_chart(fig, use_container_width=True)
-    
+
     with tab2:
         fig = px.bar(
             dados_filtrados["Status"].value_counts(),
@@ -125,15 +129,15 @@ def main():
             labels={"value": "Quantidade", "index": "Status"}
         )
         st.plotly_chart(fig, use_container_width=True)
-    
+
     st.header("💼 Leads Detalhados")
     st.dataframe(dados_filtrados, use_container_width=True, height=400)
-    
+
     st.header("⚡ Ações Rápidas")
     if st.button("🔄 Atualizar Dados"):
         aaas.dados = aaas._carregar_dados()
         st.rerun()
-    
+
     if st.button("📤 Enviar WhatsApp"):
         for _, row in dados_filtrados.iterrows():
             mensagem = f"Olá {row['Nome']}! Obrigado pelo contato via {row['Plataforma']}."
@@ -142,7 +146,7 @@ def main():
                 st.success(f"Mensagem enviada para {row['Nome']}")
             else:
                 st.error(f"Erro ao enviar para {row['Nome']}")
-    
+
     if st.button("💾 Gerar Relatório PDF"):
         pdf = FPDF()
         pdf.add_page()
@@ -150,7 +154,7 @@ def main():
         pdf.cell(200, 10, txt="Relatório AAAS - Social Seller", ln=1, align="C")
         pdf.cell(200, 10, txt=f"Período: {data_min} a {data_max}", ln=1)
         pdf.cell(200, 10, txt=f"Total Leads: {len(dados_filtrados)}", ln=1)
-        
+
         pdf_output = pdf.output(dest="S").encode("latin1")
         b64 = base64.b64encode(pdf_output).decode()
         href = f'<a href="data:application/octet-stream;base64,{b64}" download="relatorio_aaas.pdf">Baixar PDF</a>'
