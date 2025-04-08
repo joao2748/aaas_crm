@@ -1,8 +1,0 @@
-streamlit
-pandas
-gspread
-google-auth
-transformers
-torch
-plotly
-fpdf
